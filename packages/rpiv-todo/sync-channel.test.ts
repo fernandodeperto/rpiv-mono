@@ -20,27 +20,28 @@ import { STATE_ENTRY_TYPE, type TaskDetails } from "./tool/types.ts";
  * is in hand as soon as `emit` returns.
  */
 
-const overlayUpdate = vi.fn();
-const overlayModule = {
-	TodoOverlay: class {
-		setUICtx(): void {}
-		resetCompletedDisplayState(): void {}
-		update(): void {
-			overlayUpdate();
-		}
-	},
-} as unknown as typeof import("./todo-overlay.ts");
+/** Loads the real overlay; `failNext` makes the next load reject once, like a transient import failure. */
+const overlayLoader = { calls: 0, failNext: false };
+async function importOverlay(): Promise<typeof import("./todo-overlay.ts")> {
+	overlayLoader.calls++;
+	if (overlayLoader.failNext) {
+		overlayLoader.failNext = false;
+		throw new Error("transient overlay load failure");
+	}
+	return import("./todo-overlay.ts");
+}
 
 async function harness(opts: { sessionId?: string; hasUI?: boolean } = {}) {
 	__resetState();
-	overlayUpdate.mockClear();
+	overlayLoader.calls = 0;
+	overlayLoader.failNext = false;
 	const bus = createEventBus();
 	const verdicts: TodoSyncResultEventPayload[] = [];
 	bus.on(TODO_SYNC_RESULT_EVENT, (data: unknown) => {
 		verdicts.push(data as TodoSyncResultEventPayload);
 	});
 	const { pi, captured } = createMockPi({ events: bus } as never);
-	registerTodo(pi, async () => overlayModule);
+	registerTodo(pi, importOverlay);
 	const sessionId = opts.sessionId ?? "main";
 	const ctx = createMockCtx({ sessionId, hasUI: opts.hasUI ?? true });
 	const tool = captured.tools.get("todo")!;
@@ -57,7 +58,9 @@ async function harness(opts: { sessionId?: string; hasUI?: boolean } = {}) {
 		tool.execute?.("tc", params as never, undefined as never, undefined as never, ctx as never);
 	const tasks = () => getState(sessionId).tasks;
 	const live = () => tasks().filter((t) => t.status !== "deleted");
-	return { bus, captured, ctx, sync, todo, tasks, live, verdicts, sessionId };
+	const widgetDrawn = () =>
+		(ctx.ui.setWidget as ReturnType<typeof vi.fn>).mock.calls.some(([key]) => key === "rpiv-todos");
+	return { bus, captured, ctx, sync, todo, tasks, live, verdicts, sessionId, widgetDrawn };
 }
 
 const step = (n: number, status: TodoSyncItem["status"] = "pending"): TodoSyncItem => ({
@@ -126,16 +129,26 @@ describe("rpiv:todo:sync", () => {
 		expect(h.live()).toEqual([]);
 	});
 
-	it("never touches the model's own tasks or another group's", async () => {
+	it("never touches the model's own tasks, another group's, or another owner's", async () => {
 		const h = await harness();
 		await h.todo({ action: "create", subject: "model task" });
 		h.sync([step(1)], { group: "other.md" });
+		h.sync([step(1)], { owner: "someone-else" });
 		h.sync([step(1)]);
 		h.sync([]);
-		expect(h.live().map((t) => [t.subject, t.metadata?.group])).toEqual([
-			["model task", undefined],
-			["Step 1", "other.md"],
+		expect(h.live().map((t) => [t.subject, t.metadata?.owner, t.metadata?.group])).toEqual([
+			["model task", undefined, undefined],
+			["Step 1", "plannotator", "other.md"],
+			["Step 1", "someone-else", "plan.md"],
 		]);
+	});
+
+	it("deletes a group task whose key was edited away through the todo tool", async () => {
+		const h = await harness();
+		h.sync([step(1)]);
+		await h.todo({ action: "update", id: h.live()[0].id, metadata: { key: null } });
+		h.sync([]);
+		expect(h.live()).toEqual([]);
 	});
 
 	it.each([
@@ -145,14 +158,18 @@ describe("rpiv:todo:sync", () => {
 		["a non-array items", { requestId: "x", owner: "o", group: "g", items: {} }, "x"],
 		["a bad status", { requestId: "x", owner: "o", group: "g", items: [{ ...step(1), status: "done" }] }, "x"],
 		["a duplicated key", { requestId: "x", owner: "o", group: "g", items: [step(1), step(1)] }, "x"],
+		["a non-string sessionId", { requestId: "x", owner: "o", group: "g", sessionId: 42, items: [step(1)] }, "x"],
 	])("refuses %s without changing anything", async (_label, payload, requestId) => {
 		const h = await harness();
+		await h.todo({ action: "create", subject: "model task" });
+		const before = structuredClone(h.tasks());
+		const entriesBefore = h.captured.entries.length;
 		h.bus.emit(TODO_SYNC_EVENT, payload);
 		expect(h.verdicts).toHaveLength(1);
 		expect(h.verdicts[0]).toMatchObject({ ok: false, code: "invalid_payload" });
 		expect(h.verdicts[0].requestId).toBe(requestId);
-		expect(h.tasks()).toEqual([]);
-		expect(h.captured.entries).toEqual([]);
+		expect(h.tasks()).toEqual(before);
+		expect(h.captured.entries).toHaveLength(entriesBefore);
 	});
 
 	it("persists a snapshot that replays to the same state", async () => {
@@ -165,17 +182,32 @@ describe("rpiv:todo:sync", () => {
 		expect(replayed).toEqual({ tasks: h.tasks(), nextId: last.nextId });
 	});
 
-	it("reports live and redraws the overlay only for the foreground session", async () => {
+	it("reports live and draws the overlay only for the foreground session", async () => {
 		const fg = await harness({ hasUI: true });
 		fg.sync([step(1)]);
-		await vi.waitFor(() => expect(overlayUpdate).toHaveBeenCalled());
+		await vi.waitFor(() => expect(fg.widgetDrawn()).toBe(true));
 
 		const headless = await harness({ hasUI: false, sessionId: "child" });
 		expect(headless.sync([step(1)], { sessionId: "child" })).toEqual([
 			{ ok: true, requestId: "r1", sessionId: "child", live: false },
 		]);
-		await Promise.resolve();
-		expect(overlayUpdate).not.toHaveBeenCalled();
+		await new Promise((resolve) => setTimeout(resolve, 0));
+		expect(overlayLoader.calls).toBe(0);
+		expect(headless.widgetDrawn()).toBe(false);
+	});
+
+	it("an identical retry redraws an overlay whose first load failed", async () => {
+		const h = await harness();
+		const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+		overlayLoader.failNext = true;
+		h.sync([step(1)]);
+		await vi.waitFor(() => expect(warn).toHaveBeenCalled());
+		expect(h.widgetDrawn()).toBe(false);
+
+		const entries = h.captured.entries.length;
+		h.sync([step(1)]);
+		await vi.waitFor(() => expect(h.widgetDrawn()).toBe(true));
+		expect(h.captured.entries).toHaveLength(entries);
 	});
 
 	it("stays silent for a session this instance does not own", async () => {

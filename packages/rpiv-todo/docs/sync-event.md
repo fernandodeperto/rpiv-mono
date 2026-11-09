@@ -42,8 +42,8 @@ off();
 | `requestId` | Echoed on the verdict. Required. |
 | `owner` | Who owns the group. Non-empty. |
 | `group` | Which of the owner's lists this is. Non-empty. |
-| `sessionId` | Session to write. Omit to target the foreground session. |
-| `items[]` | The whole group in display order: `key` (unique, non-empty), `subject` (non-empty), `status` (`pending`, `in_progress` or `completed`). |
+| `sessionId` | Session to write, non-empty when given. Omit to target the foreground session. |
+| `items[]` | The whole group: `key` (unique, non-empty), `subject` (non-empty), `status` (`pending`, `in_progress` or `completed`). New tasks are appended in this order; existing ones keep their place. |
 
 ## What a sync does
 
@@ -54,8 +54,8 @@ and `group`. Each sync makes that group match `items`:
 - A task whose subject or status differs is updated in place.
 - A move the status machine forbids (`completed` back to `pending` or
   `in_progress`) deletes the old task and creates a new one.
-- A task whose key is no longer listed is deleted. An empty `items` deletes the
-  whole group.
+- A task whose key is no longer listed, or whose `key` metadata was removed, is
+  deleted. An empty `items` deletes the whole group.
 - A sync that changes nothing writes nothing.
 
 Tasks outside the group, including every task the model created with the
