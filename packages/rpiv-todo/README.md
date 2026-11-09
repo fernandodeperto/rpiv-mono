@@ -63,9 +63,6 @@ by status.
   self-blocks, and cycles are all rejected.
 - **Parallel sessions stay separate.** Task state is keyed by session, so a
   detached or child session can neither read nor overwrite the foreground list.
-- **Other extensions can share the panel.** A plan runner can mirror its steps
-  into the overlay over the `rpiv:todo:sync` event instead of drawing a second
-  progress widget; the model's own tasks are left alone.
 - **Localized UI, no setup required.** Nine locales ship with the package and
   activate when [`@juicesharp/rpiv-i18n`](https://www.npmjs.com/package/@juicesharp/rpiv-i18n)
   is installed; without it, everything falls back to English.

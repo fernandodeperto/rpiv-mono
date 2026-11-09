@@ -41,7 +41,7 @@ export interface TodoSyncEventPayload {
 	group: string;
 	/** Session to write, as `ctx.sessionManager.getSessionId()` reports it. Defaults to the foreground session. */
 	sessionId?: string;
-	/** The whole group, in display order. */
+	/** The whole group. New tasks are appended in this order; existing ones keep their place. */
 	items: ReadonlyArray<TodoSyncItem>;
 }
 

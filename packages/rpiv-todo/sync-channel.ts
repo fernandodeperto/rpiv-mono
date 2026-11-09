@@ -16,17 +16,11 @@ const ITEM_STATUSES: ReadonlySet<unknown> = new Set(["pending", "in_progress", "
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 const isNonBlank = (v: unknown): v is string => typeof v === "string" && v.trim() !== "";
 
-/** The metadata stamped on every task a sync owns; it is how later syncs find them. */
-interface SyncMetadata {
-	owner: string;
-	group: string;
-	key: string;
-}
-
-function ownedKey(task: TaskState["tasks"][number], owner: string, group: string): string | undefined {
+/** `undefined` for a task outside the group; `null` for a group task whose key was edited away. */
+function ownedKey(task: TaskState["tasks"][number], owner: string, group: string): string | null | undefined {
 	const m = task.metadata;
 	if (task.status === "deleted" || !m || m.owner !== owner || m.group !== group) return undefined;
-	return typeof m.key === "string" ? m.key : undefined;
+	return typeof m.key === "string" ? m.key : null;
 }
 
 /** Validate the request's items. Returns the reason for the first problem, or the items. */
@@ -48,7 +42,7 @@ function parseItems(value: unknown): TodoSyncItem[] | string {
  * Bring one owner's group in line with `items`, through the same reducer the
  * `todo` tool uses. Returns the new state and whether anything changed.
  */
-export function reconcileGroup(
+function reconcileGroup(
 	start: TaskState,
 	owner: string,
 	group: string,
@@ -71,8 +65,8 @@ export function reconcileGroup(
 	for (const task of start.tasks) {
 		const key = ownedKey(task, owner, group);
 		if (key === undefined) continue;
-		// A key no longer listed, or a duplicate of one already kept, goes.
-		if (!wanted.has(key) || existing.has(key)) apply("delete", { id: task.id });
+		// A key no longer listed, a duplicate of one already kept, or a lost key goes.
+		if (key === null || !wanted.has(key) || existing.has(key)) apply("delete", { id: task.id });
 		else existing.set(key, task.id);
 	}
 
@@ -86,8 +80,8 @@ export function reconcileGroup(
 		}
 		// New, or a move the task lifecycle forbids (completed → pending): replace it.
 		if (current) apply("delete", { id: current.id });
-		const metadata: SyncMetadata = { owner, group, key: item.key };
-		const created = apply("create", { subject: item.subject, metadata: { ...metadata } });
+		// This metadata is how later syncs find the task again.
+		const created = apply("create", { subject: item.subject, metadata: { owner, group, key: item.key } });
 		if (item.status !== "pending") apply("update", { id: created, status: item.status });
 	}
 
@@ -114,6 +108,7 @@ export function registerSyncChannel(pi: ExtensionAPI, deps: SyncChannelDeps): vo
 		const payload = isRecord(data) ? data : {};
 		const own = deps.ownSession();
 		if (own === undefined) return;
+		// A malformed sessionId falls to the foreground instance, which refuses it below.
 		const target = typeof payload.sessionId === "string" ? payload.sessionId : getActiveRenderSession();
 		if (target !== own) return;
 
@@ -128,6 +123,9 @@ export function registerSyncChannel(pi: ExtensionAPI, deps: SyncChannelDeps): vo
 
 		if (!isRecord(data)) return reject("payload must be an object");
 		if (requestId === undefined) return reject("requestId must be a string");
+		if (payload.sessionId !== undefined && !isNonBlank(payload.sessionId)) {
+			return reject("sessionId must be a non-empty string when given");
+		}
 		if (!isNonBlank(payload.owner)) return reject("owner must be a non-empty string");
 		if (!isNonBlank(payload.group)) return reject("group must be a non-empty string");
 		const items = parseItems(payload.items);
@@ -147,6 +145,7 @@ export function registerSyncChannel(pi: ExtensionAPI, deps: SyncChannelDeps): vo
 			pi.appendEntry(STATE_ENTRY_TYPE, details);
 		}
 		reply({ ok: true, sessionId: target, live });
-		if (changed && live) deps.refresh();
+		// Refresh even when nothing changed, so a retry heals an overlay whose last load failed.
+		if (live) deps.refresh();
 	});
 }
