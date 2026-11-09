@@ -33,6 +33,7 @@ import {
 	setActiveRenderSession,
 	sid,
 } from "./state/store.ts";
+import { registerSyncChannel } from "./sync-channel.ts";
 import { registerTodosCommand, registerTodoTool, TOOL_NAME } from "./todo.ts";
 import type { TodoOverlay } from "./todo-overlay.ts";
 
@@ -130,6 +131,8 @@ export default function (pi: ExtensionAPI, importOverlay: TodoOverlayImporter = 
 	const loadTodoOverlay = makeTodoOverlayLoader(importOverlay);
 	let uiCtx: ExtensionUIContext | undefined;
 	let lifecycleGeneration = 0;
+	// The session this instance runs in, for the sync channel's ownership check.
+	let ownSession: string | undefined;
 
 	async function updateTodoOverlay(
 		resetCompletedDisplayState = false,
@@ -147,8 +150,27 @@ export default function (pi: ExtensionAPI, importOverlay: TodoOverlayImporter = 
 		todoOverlay.update();
 	}
 
+	// A transient overlay-load failure only costs this one refresh, and the
+	// loader's cleared memo lets the next update retry, so it is logged rather
+	// than surfaced as an extension error. The latched stale-namespace error still
+	// propagates: it never self-heals, and the user needs its restart guidance.
+	async function refreshOverlay(): Promise<void> {
+		try {
+			await updateTodoOverlay();
+		} catch (e) {
+			if (isStaleOverlayModuleError(e)) throw e;
+			console.warn(`[rpiv-todo] overlay refresh failed (will retry on next update): ${formatError(e)}`);
+		}
+	}
+
 	registerTodoTool(pi);
 	registerTodosCommand(pi);
+	registerSyncChannel(pi, {
+		ownSession: () => ownSession,
+		refresh: () => {
+			void refreshOverlay().catch((e) => console.warn(`[rpiv-todo] ${formatError(e)}`));
+		},
+	});
 
 	// Collapse/expand hotkey for the todo overlay. The key is resolved once at
 	// factory scope from config (register-once contract: a config change needs
@@ -204,6 +226,7 @@ export default function (pi: ExtensionAPI, importOverlay: TodoOverlayImporter = 
 			if (!isStaleCtxError(e)) throw e;
 			return;
 		}
+		ownSession = id;
 		if (!ctx.hasUI) return;
 		// First UI-bearing session_start claims the foreground (the interactive
 		// launcher, by spawn-ordering) without eagerly loading the overlay.
@@ -237,6 +260,7 @@ export default function (pi: ExtensionAPI, importOverlay: TodoOverlayImporter = 
 		}
 		// The shutting-down session's own data slot is always evicted.
 		evictSession(s);
+		if (s === "" || s === ownSession) ownSession = undefined;
 		// Overlay teardown is sid-gated: a child shutdown (distinct sid) must not
 		// dispose the foreground's overlay. Only the foreground's own shutdown
 		// (or an unknown/stale sid) tears it down and clears the pointer.
@@ -263,17 +287,7 @@ export default function (pi: ExtensionAPI, importOverlay: TodoOverlayImporter = 
 	// (branch is stale — message_end runs after tool_execution_end).
 	pi.on("tool_execution_end", async (event) => {
 		if (event.toolName !== TOOL_NAME || event.isError) return;
-		try {
-			await updateTodoOverlay();
-		} catch (e) {
-			// The tool itself succeeded — a transient overlay-load failure only
-			// costs this one refresh, and the loader's cleared memo lets the next
-			// update retry. Don't surface that as an extension error. The latched
-			// stale-namespace error still propagates: it never self-heals, and the
-			// user needs its restart guidance.
-			if (isStaleOverlayModuleError(e)) throw e;
-			console.warn(`[rpiv-todo] overlay refresh failed (will retry on next update): ${formatError(e)}`);
-		}
+		await refreshOverlay();
 	});
 
 	// Evaluate the lazy graph after startup while Pi's boot-time dependency paths

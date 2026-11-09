@@ -7,6 +7,10 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **Other extensions can mirror their progress into the overlay.** rpiv-todo now listens for `rpiv:todo:sync` on `pi.events`. The request carries an `owner`, a `group` and the group's full item list; rpiv-todo creates, updates and deletes that group's tasks to match, through the same reducer and replay entry as the `todo` tool, and leaves every other task alone. The owning instance answers synchronously on `rpiv:todo:sync-result` with `live: true` when the overlay on screen shows the change, so a plan runner can hide its own widget. The constants and payload types are exported from `@juicesharp/rpiv-todo/events`. See [docs/sync-event.md](docs/sync-event.md).
+
 ## [2.15.0] - 2026-10-24
 
 ### Fixed
