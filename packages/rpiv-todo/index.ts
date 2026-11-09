@@ -22,6 +22,7 @@
 import type { ExtensionAPI, ExtensionUIContext } from "@earendil-works/pi-coding-agent";
 import type { KeyId } from "@earendil-works/pi-tui";
 import { COLLAPSE_KEY_OFF, resolveCollapseKey } from "./config.ts";
+import { TODO_READY_EVENT, type TodoReadyEventPayload } from "./events.ts";
 import { I18N_NAMESPACE } from "./state/i18n-bridge.ts";
 import { replayFromBranch } from "./state/replay.ts";
 import {
@@ -227,10 +228,13 @@ export default function (pi: ExtensionAPI, importOverlay: TodoOverlayImporter = 
 			return;
 		}
 		ownSession = id;
-		if (!ctx.hasUI) return;
 		// First UI-bearing session_start claims the foreground (the interactive
 		// launcher, by spawn-ordering) without eagerly loading the overlay.
-		if (getActiveRenderSession() === "") setActiveRenderSession(id);
+		if (ctx.hasUI && getActiveRenderSession() === "") setActiveRenderSession(id);
+		// Announced after the foreground claim, so a sync sent in response reports
+		// `live` correctly; the overlay refresh below then draws what it wrote.
+		pi.events.emit(TODO_READY_EVENT, { sessionId: id } satisfies TodoReadyEventPayload);
+		if (!ctx.hasUI) return;
 		// Only the foreground re-binds/refreshes the shared overlay. A child
 		// (distinct sid) is skipped — does not rebind to a relay/stale ui.
 		if (id !== getActiveRenderSession()) return;

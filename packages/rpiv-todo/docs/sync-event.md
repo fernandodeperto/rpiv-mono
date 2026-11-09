@@ -84,6 +84,23 @@ Only the owning instance answers because `pi.appendEntry` writes to the session
 an extension instance belongs to. A child session runs its own instance, so a
 sync aimed at it is answered by that instance and persisted on its branch.
 
+## Startup order
+
+Pi runs each extension's `session_start` handler in turn. If your extension
+probes during its own `session_start` and rpiv-todo's has not run yet, no
+verdict comes back. rpiv-todo emits `rpiv:todo:ready` with `{ sessionId }` once
+it owns a session (on start, `/reload` and resume), so listen for it and sync
+then:
+
+```ts
+import { TODO_READY_EVENT, type TodoReadyEventPayload } from "@juicesharp/rpiv-todo/events";
+
+pi.events.on(TODO_READY_EVENT, (data) => {
+  const { sessionId } = data as TodoReadyEventPayload;
+  // sync again if sessionId is this session and nothing answered earlier
+});
+```
+
 ## Stability
 
 The `rpiv:*` policy applies: channel names never change, payload fields are

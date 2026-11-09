@@ -2,6 +2,7 @@ import { createEventBus } from "@earendil-works/pi-coding-agent";
 import { createMockCtx, createMockPi, makeCustomEntry } from "@juicesharp/rpiv-test-utils";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
+	TODO_READY_EVENT,
 	TODO_SYNC_EVENT,
 	TODO_SYNC_RESULT_EVENT,
 	type TodoSyncEventPayload,
@@ -40,6 +41,7 @@ async function harness(opts: { sessionId?: string; hasUI?: boolean } = {}) {
 	bus.on(TODO_SYNC_RESULT_EVENT, (data: unknown) => {
 		verdicts.push(data as TodoSyncResultEventPayload);
 	});
+
 	const { pi, captured } = createMockPi({ events: bus } as never);
 	registerTodo(pi, importOverlay);
 	const sessionId = opts.sessionId ?? "main";
@@ -208,6 +210,30 @@ describe("rpiv:todo:sync", () => {
 		h.sync([step(1)]);
 		await vi.waitFor(() => expect(h.widgetDrawn()).toBe(true));
 		expect(h.captured.entries).toHaveLength(entries);
+	});
+
+	it("announces readiness after claiming the foreground, so a sync sent in response is live", async () => {
+		__resetState();
+		const bus = createEventBus();
+		const verdicts: TodoSyncResultEventPayload[] = [];
+		bus.on(TODO_SYNC_RESULT_EVENT, (data: unknown) => {
+			verdicts.push(data as TodoSyncResultEventPayload);
+		});
+		bus.on(TODO_READY_EVENT, (data: unknown) => {
+			const { sessionId } = data as { sessionId: string };
+			bus.emit(TODO_SYNC_EVENT, { requestId: "on-ready", owner: "o", group: "g", sessionId, items: [step(1)] });
+		});
+		const { pi, captured } = createMockPi({ events: bus } as never);
+		registerTodo(pi, importOverlay);
+		const ctx = createMockCtx({ sessionId: "resumed", hasUI: true });
+		await captured.events.get("session_start")![0]({} as never, ctx as never);
+
+		expect(verdicts).toEqual([{ ok: true, requestId: "on-ready", sessionId: "resumed", live: true }]);
+		await vi.waitFor(() =>
+			expect((ctx.ui.setWidget as ReturnType<typeof vi.fn>).mock.calls.some(([key]) => key === "rpiv-todos")).toBe(
+				true,
+			),
+		);
 	});
 
 	it("stays silent for a session this instance does not own", async () => {

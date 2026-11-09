@@ -45,6 +45,18 @@ export interface TodoSyncEventPayload {
 	items: ReadonlyArray<TodoSyncItem>;
 }
 
+/**
+ * rpiv-todo is ready to answer `TODO_SYNC_EVENT` for a session. Emitted when the
+ * session starts (including `/reload` and resume), after its tasks are replayed.
+ * Pi runs extensions' `session_start` handlers one after another, so an emitter
+ * that probed earlier in the same startup got no verdict; this is its cue to sync.
+ */
+export const TODO_READY_EVENT = "rpiv:todo:ready" as const;
+
+export interface TodoReadyEventPayload {
+	sessionId: string;
+}
+
 /** Verdict for a `TODO_SYNC_EVENT`. One per request, accepted or not. */
 export const TODO_SYNC_RESULT_EVENT = "rpiv:todo:sync-result" as const;
 
