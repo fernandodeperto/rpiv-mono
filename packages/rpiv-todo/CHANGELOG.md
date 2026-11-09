@@ -11,6 +11,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - **`maxWidgetLines: 0` turns the overlay off.** The panel above the editor is no longer drawn, while the `todo` tool and `/todos` keep working. Like any other `maxWidgetLines` value, it applies on the next repaint, without `/reload`.
 - **Clicking the panel heading collapses and expands it.** This helps in terminals where the collapse shortcut never arrives. Only a plain left click on the heading row counts; task rows, modified clicks, drags and the mouse wheel work as before, and it works with `collapseKey: "off"`. It needs Pi's fullscreen TUI mode (`tuiMode: "fullscreen"`, the default), which turns on mouse tracking. Thanks @summer-tt ([#323](https://github.com/juicesharp/rpiv-mono/pull/323)).
+- **Other extensions can mirror their progress into the overlay.** rpiv-todo now listens for `rpiv:todo:sync` on `pi.events`. The request carries an `owner`, a `group` and the group's full item list; rpiv-todo creates, updates and deletes that group's tasks to match, through the same reducer and replay entry as the `todo` tool, and leaves every other task alone. The owning instance answers synchronously on `rpiv:todo:sync-result` with `live: true` when the overlay on screen shows the change, so a plan runner can hide its own widget. The constants and payload types are exported from `@juicesharp/rpiv-todo/events`. See [docs/sync-event.md](docs/sync-event.md).
 
 ### Fixed
 
