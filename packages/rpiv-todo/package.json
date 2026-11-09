@@ -9,6 +9,10 @@
 		"todo"
 	],
 	"type": "module",
+	"exports": {
+		".": "./index.ts",
+		"./events": "./events.ts"
+	},
 	"license": "MIT",
 	"author": "juicesharp",
 	"repository": {
@@ -28,8 +32,10 @@
 	},
 	"files": [
 		"config.ts",
+		"events.ts",
 		"index.ts",
 		"locales/",
+		"sync-channel.ts",
 		"todo.ts",
 		"todo-overlay.ts",
 		"LICENSE",

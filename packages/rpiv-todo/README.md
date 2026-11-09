@@ -100,6 +100,8 @@ this file — it never writes one. Full semantics:
 - [Overlay and `/todos`](https://github.com/juicesharp/rpiv-mono/blob/main/packages/rpiv-todo/docs/overlay.md)
   — overlay lifecycle, glyphs, overflow behavior, `/todos` output, and
   localization.
+- [Syncing tasks from another extension](https://github.com/juicesharp/rpiv-mono/blob/main/packages/rpiv-todo/docs/sync-event.md)
+  — the `rpiv:todo:sync` request, how a group is reconciled, and the verdict.
 
 ## Requirements
 
